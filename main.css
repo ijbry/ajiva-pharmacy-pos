@@ -1,0 +1,1504 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>AJIVA Pharmacy POS</title>
+
+<!-- Supabase -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<!-- Icons -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
+
+<!-- Stylesheets -->
+<link rel="stylesheet" href="css/main.css">
+<link rel="stylesheet" href="css/print.css">
+<link rel="stylesheet" href="css/mobile.css">
+</head>
+<body>
+
+<!-- HIDDEN PRINT AREA -->
+<div id="print-area" style="display:none"></div>
+
+<!-- ===== SUPABASE SETUP SCREEN ===== -->
+<div id="setup-screen">
+  <div class="setup-card">
+    <div class="setup-logo">
+      <div class="logo-icon"><i class="ti ti-pill" style="font-size:26px;color:var(--green)"></i></div>
+      <h1>AJIVA PHARMACY POS</h1>
+      <p>Database Setup — Supabase (Free)</p>
+    </div>
+
+    <div class="steps-list">
+      <div class="step-item">
+        <div class="step-num">1</div>
+        <div class="step-text"><strong>Create a free Supabase account</strong>Go to <code>https://supabase.com</code> → Sign Up → Create New Project → choose any region</div>
+      </div>
+      <div class="step-item">
+        <div class="step-num">2</div>
+        <div class="step-text"><strong>Run this SQL in Supabase SQL Editor</strong>Go to your project → SQL Editor → New Query → paste & run:</div>
+      </div>
+    </div>
+    <div class="sql-box" id="setup-sql-box">CREATE TABLE products (
+  id bigserial PRIMARY KEY,
+  name text NOT NULL,
+  generic text,
+  category text,
+  price numeric(10,2) DEFAULT 0,
+  stock integer DEFAULT 0,
+  low_stock_alert integer DEFAULT 10,
+  expiry_date date,
+  created_at timestamptz DEFAULT now()
+);
+
+CREATE TABLE transactions (
+  id bigserial PRIMARY KEY,
+  or_number text UNIQUE,
+  cashier text,
+  subtotal numeric(10,2),
+  discount numeric(10,2) DEFAULT 0,
+  total numeric(10,2),
+  tendered numeric(10,2),
+  change_amount numeric(10,2),
+  created_at timestamptz DEFAULT now()
+);
+
+CREATE TABLE transaction_items (
+  id bigserial PRIMARY KEY,
+  transaction_id bigint REFERENCES transactions(id),
+  product_id bigint,
+  product_name text,
+  price numeric(10,2),
+  quantity integer,
+  subtotal numeric(10,2)
+);
+
+ALTER TABLE products ENABLE ROW LEVEL SECURITY;
+ALTER TABLE transactions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE transaction_items ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "public_all_products" ON products FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "public_all_transactions" ON transactions FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "public_all_tx_items" ON transaction_items FOR ALL USING (true) WITH CHECK (true);
+
+CREATE TABLE branches (
+  id bigserial PRIMARY KEY,
+  name text NOT NULL,
+  code text UNIQUE NOT NULL,
+  address text,
+  is_active boolean DEFAULT true,
+  created_at timestamptz DEFAULT now()
+);
+ALTER TABLE branches ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "public_all_branches" ON branches FOR ALL USING (true) WITH CHECK (true);
+
+CREATE TABLE IF NOT EXISTS pos_users (
+  id bigserial PRIMARY KEY,
+  name text NOT NULL,
+  username text UNIQUE NOT NULL,
+  password text NOT NULL,
+  role text DEFAULT 'cashier',
+  branch_id bigint,
+  branch_name text,
+  is_active boolean DEFAULT true,
+  created_at timestamptz DEFAULT now()
+);
+ALTER TABLE pos_users ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "public_all_pos_users" ON pos_users FOR ALL USING (true) WITH CHECK (true);
+
+ALTER TABLE transactions ADD COLUMN IF NOT EXISTS branch_id bigint;
+ALTER TABLE transactions ADD COLUMN IF NOT EXISTS branch_name text;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS branch_id bigint;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS branch_name text;</div>
+    <button class="copy-sql-btn" onclick="copySQL()"><i class="ti ti-copy" style="font-size:13px"></i> Copy SQL</button>
+
+    <div class="steps-list" style="margin-top:10px;margin-bottom:0">
+      <div class="step-item">
+        <div class="step-num">3</div>
+        <div class="step-text"><strong>Get your Project URL & anon key</strong>Go to Settings → API → copy <code>Project URL</code> and <code>anon public</code> key below</div>
+      </div>
+    </div>
+    <hr class="setup-divider">
+    <div class="setup-field">
+      <label>Supabase Project URL</label>
+      <input type="text" id="sb-url" placeholder="https://xxxxxxxxxxxx.supabase.co">
+    </div>
+    <div class="setup-field">
+      <label>Supabase Anon Key</label>
+      <input type="text" id="sb-key" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...">
+    </div>
+    <div class="setup-error" id="setup-error"></div>
+    <button class="setup-btn" onclick="connectSupabase()"><i class="ti ti-database" style="font-size:16px"></i> Connect & Save</button>
+    <button class="setup-skip" onclick="skipToLocal()"><i class="ti ti-wifi-off" style="font-size:14px"></i> Use Offline / Local Mode (data resets on refresh)</button>
+  </div>
+</div>
+
+<!-- ===== LOGIN ===== -->
+<div id="login-screen">
+  <div class="login-card">
+    <div class="login-logo">
+      <div class="logo-icon"><i class="ti ti-pill" style="font-size:28px;color:var(--green)"></i></div>
+      <h1>AJIVA PHARMACY</h1>
+      <p>Point of Sale System</p>
+    </div>
+    <div class="db-badge" id="db-badge"></div>
+    <div class="login-field">
+      <label>Username</label>
+      <input type="text" id="login-user" placeholder="Enter username">
+    </div>
+    <div class="login-field">
+      <label>Password</label>
+      <input type="password" id="login-pass" placeholder="Enter password" onkeydown="if(event.key==='Enter')doLogin()">
+    </div>
+    <div class="login-field">
+      <label>Branch</label>
+      <select id="login-branch">
+        <option value="">-- Select Branch --</option>
+      </select>
+    </div>
+    <button class="login-btn" onclick="doLogin()">Sign In</button>
+    <div class="login-error" id="login-error">Invalid username or password.</div>
+
+  </div>
+</div>
+
+<!-- ===== MAIN APP ===== -->
+<div id="app">
+  <nav class="topnav">
+    <div style="display:flex;align-items:center;gap:8px">
+      <button class="hamburger-btn" onclick="toggleSidebar()" id="hamburger-btn"><i class="ti ti-menu-2"></i></button>
+      <div class="topnav-brand"><i class="ti ti-pill"></i> AJIVA PHARMACY</div>
+    </div>
+    <div class="topnav-right">
+      <span class="topnav-user" id="nav-user-label"></span>
+      <button class="nav-logout" onclick="doLogout()"><i class="ti ti-logout" style="font-size:14px"></i> <span>Logout</span></button>
+    </div>
+  </nav>
+  <div class="sidebar-overlay" id="sidebar-overlay" onclick="closeSidebar()"></div>
+  <div class="app-body">
+    <aside class="sidebar">
+      <div class="nav-section-label">Main</div>
+      <div class="nav-item active" onclick="showScreen('dashboard',this)"><i class="ti ti-layout-dashboard"></i> Dashboard</div>
+      <div class="nav-item" onclick="showScreen('pos',this)"><i class="ti ti-shopping-cart"></i> Cashiering</div>
+      <div class="nav-section-label" id="nav-admin-section">Management</div>
+      <div class="nav-item" id="nav-inventory" onclick="showScreen('inventory',this)"><i class="ti ti-package"></i> Inventory</div>
+      <div class="nav-item" id="nav-reports" onclick="showScreen('reports',this)"><i class="ti ti-chart-bar"></i> Reports</div>
+      <div class="nav-item" id="nav-branches" onclick="showScreen('branches',this)"><i class="ti ti-building-store"></i> Branches</div>
+      <div class="nav-item" id="nav-users" onclick="showScreen('users',this)"><i class="ti ti-users"></i> User Management</div>
+      <div class="nav-section-label" id="nav-ops-label">Operations</div>
+      <div class="nav-item" id="nav-refund" onclick="showScreen('refund',this)"><i class="ti ti-receipt-refund"></i> Refund Entry</div>
+      <div class="nav-item" id="nav-plu" onclick="showScreen('plu',this)"><i class="ti ti-search"></i> Price Inquiry</div>
+      <div class="nav-item" id="nav-shift" onclick="showScreen('shift',this)"><i class="ti ti-clock-record"></i> Shift / EOD</div>
+      <div class="nav-item" id="nav-incoming" onclick="showScreen('incoming',this)"><i class="ti ti-truck-delivery"></i> Incoming Stock</div>
+      <div class="nav-item" id="nav-alerts" onclick="showScreen('alerts',this)"><i class="ti ti-bell-ringing"></i> Alerts <span id="alert-badge" style="background:var(--red);color:white;border-radius:20px;font-size:10px;font-weight:700;padding:1px 6px;margin-left:2px;display:none">0</span></div>
+    </aside>
+    <main class="main-content">
+
+      <!-- DASHBOARD -->
+      <div class="screen active" id="screen-dashboard">
+        <div class="page-header">
+          <div style="display:flex;align-items:center;justify-content:space-between">
+            <div><h2>Dashboard</h2><p id="dash-date"></p></div>
+            <span class="badge badge-green" id="dash-branch-badge" style="font-size:12px;padding:4px 12px"></span>
+          </div>
+        </div>
+        <div class="stat-grid">
+          <div class="stat-card stat-green"><div class="stat-label"><i class="ti ti-cash" style="font-size:14px"></i> Today's Sales</div><div class="stat-value" id="s-sales">₱0.00</div><div class="stat-sub" id="s-txcount">0 transactions</div></div>
+          <div class="stat-card"><div class="stat-label"><i class="ti ti-receipt" style="font-size:14px"></i> Transactions</div><div class="stat-value" id="s-tx">0</div><div class="stat-sub">Today</div></div>
+          <div class="stat-card stat-amber"><div class="stat-label"><i class="ti ti-alert-triangle" style="font-size:14px"></i> Low Stock</div><div class="stat-value" id="s-low">0</div><div class="stat-sub">Items to restock</div></div>
+          <div class="stat-card"><div class="stat-label"><i class="ti ti-package" style="font-size:14px"></i> Products</div><div class="stat-value" id="s-items">0</div><div class="stat-sub">In catalog</div></div>
+        </div>
+        <div class="dash-grid">
+          <div class="dash-card"><h3><i class="ti ti-clock" style="font-size:16px"></i> Recent Transactions</h3><div id="dash-recent"></div></div>
+          <div class="dash-card"><h3><i class="ti ti-alert-circle" style="font-size:16px"></i> Low Stock Alerts</h3><div id="dash-lowstock"></div></div>
+        </div>
+      </div>
+
+      <!-- POS -->
+      <div class="screen" id="screen-pos">
+        <div class="pos-layout">
+          <div class="pos-left">
+            <div class="pos-search-bar">
+              <i class="ti ti-search"></i>
+              <input type="text" id="pos-search" placeholder="Search medicine or product..." oninput="renderProducts()">
+            </div>
+            <div class="cat-tabs" id="cat-tabs"></div>
+            <div class="products-grid" id="products-grid"></div>
+          </div>
+          <div class="pos-right">
+            <div class="cart-header">
+              <h3><i class="ti ti-shopping-cart" style="font-size:16px"></i> Cart <span id="cart-count" style="font-size:12px;color:var(--gray-400)"></span></h3>
+              <button class="cart-clear" onclick="clearCart()"><i class="ti ti-trash" style="font-size:13px"></i> Clear</button>
+            </div>
+            <div class="cart-items" id="cart-items"><div class="cart-empty"><i class="ti ti-shopping-cart-off"></i><span>Cart is empty</span></div></div>
+            <div class="cart-footer">
+              <div class="cart-summary">
+                <div class="summary-row"><span>Subtotal</span><span id="cart-subtotal">₱0.00</span></div>
+                <div class="summary-row"><span>Discount</span><span id="cart-disc-show" style="color:var(--red)">-₱0.00</span></div>
+                <div class="summary-row total"><span>TOTAL</span><span id="cart-total">₱0.00</span></div>
+              </div>
+              <div class="discount-row">
+                <input type="number" id="discount-input" placeholder="Discount (₱)" min="0" oninput="calcTotal()">
+                <button onclick="applyDiscount()" class="btn-secondary">Apply</button>
+              </div>
+              <button class="checkout-btn" id="checkout-btn" onclick="openCashModal()" disabled><i class="ti ti-cash"></i> Checkout</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- INVENTORY -->
+      <div class="screen" id="screen-inventory">
+        <div class="page-header"><h2>Inventory Management</h2><p id="inv-branch-label">Manage your medicine and product catalog</p></div>
+        <div class="toolbar" style="flex-wrap:wrap;gap:8px">
+          <div class="search-input-wrap"><i class="ti ti-search"></i><input type="text" placeholder="Search products..." oninput="renderInventory(this.value)"></div>
+          <select id="inv-cat-filter" onchange="renderInventory()" style="padding:8px 10px;border:1.5px solid var(--gray-200);border-radius:var(--radius);font-size:13px;outline:none">
+            <option value="">All Categories</option>
+          </select>
+          <div style="flex:1;min-width:0"></div>
+          <button class="btn-print no-print" onclick="printInventoryReport()" style="white-space:nowrap"><i class="ti ti-printer"></i> Print Report</button>
+          <button class="btn-primary" onclick="openProductModal()" style="white-space:nowrap"><i class="ti ti-plus"></i> Add Product</button>
+        </div>
+        <table class="data-table"><thead><tr><th>#</th><th>Product Name</th><th>Category</th><th>Price</th><th>Stock</th><th>Low Alert</th><th>Expiry</th><th>Status</th><th>Actions</th></tr></thead><tbody id="inv-tbody"></tbody></table>
+      </div>
+
+      <!-- REPORTS -->
+      <div class="screen" id="screen-reports">
+        <div class="page-header" style="display:flex;align-items:flex-start;justify-content:space-between">
+          <div><h2>Sales Reports</h2><p>Analytics and printable reports</p></div>
+          <button class="btn-print no-print" id="rpt-print-btn" onclick="printCurrentReport()"><i class="ti ti-printer"></i> Print Report</button>
+        </div>
+        <div class="report-tabs">
+          <div class="report-tab active" onclick="switchReportTab('summary',this)">Sales Summary</div>
+          <div class="report-tab" onclick="switchReportTab('daily',this)">Daily Sales</div>
+          <div class="report-tab" onclick="switchReportTab('history',this)">Transaction History</div>
+        </div>
+
+        <!-- SUMMARY TAB -->
+        <div class="report-section active" id="rpt-summary">
+          <div class="date-filter">
+            <label style="font-size:13px;color:var(--gray-600)">Branch:</label>
+            <select id="rpt-branch" onchange="renderReports()">
+              <option value="">All Branches</option>
+            </select>
+            <label style="font-size:13px;color:var(--gray-600)">Period:</label>
+            <select id="rpt-period" onchange="renderReports()">
+              <option value="today">Today</option>
+              <option value="week" selected>This Week (7 days)</option>
+              <option value="month">This Month (30 days)</option>
+            </select>
+          </div>
+          <div class="stat-grid" style="grid-template-columns:repeat(3,1fr)">
+            <div class="stat-card stat-green"><div class="stat-label"><i class="ti ti-cash" style="font-size:14px"></i> Total Revenue</div><div class="stat-value" id="rpt-revenue">₱0.00</div></div>
+            <div class="stat-card"><div class="stat-label"><i class="ti ti-receipt" style="font-size:14px"></i> Transactions</div><div class="stat-value" id="rpt-txcount">0</div></div>
+            <div class="stat-card"><div class="stat-label"><i class="ti ti-trending-up" style="font-size:14px"></i> Avg per Transaction</div><div class="stat-value" id="rpt-avg">₱0.00</div></div>
+          </div>
+          <div class="report-grid">
+            <div class="report-card"><h3><i class="ti ti-chart-bar" style="font-size:16px"></i> Sales by Day</h3><div class="bar-chart" id="bar-chart"></div></div>
+            <div class="report-card"><h3><i class="ti ti-star" style="font-size:16px"></i> Top Selling Products</h3><table style="width:100%;border-collapse:collapse" id="top-products"></table></div>
+          </div>
+        </div>
+
+        <!-- DAILY TAB -->
+        <div class="report-section" id="rpt-daily">
+          <div class="date-filter">
+            <label style="font-size:13px;color:var(--gray-600)">Date:</label>
+            <input type="date" id="daily-date">
+            <button class="btn-primary" onclick="loadDailySales()"><i class="ti ti-search"></i> View</button>
+            <button class="btn-print no-print" onclick="printDailySales()"><i class="ti ti-printer"></i> Print</button>
+          </div>
+          <div class="stat-grid" style="grid-template-columns:repeat(3,1fr)">
+            <div class="stat-card stat-green"><div class="stat-label">Daily Revenue</div><div class="stat-value" id="daily-revenue">₱0.00</div></div>
+            <div class="stat-card"><div class="stat-label">Transactions</div><div class="stat-value" id="daily-txcount">0</div></div>
+            <div class="stat-card"><div class="stat-label">Items Sold</div><div class="stat-value" id="daily-items">0</div></div>
+          </div>
+          <div class="report-card"><h3><i class="ti ti-list" style="font-size:16px"></i> Daily Transactions</h3>
+            <table class="data-table"><thead><tr><th>OR #</th><th>Time</th><th>Items</th><th>Cashier</th><th>Discount</th><th>Total</th></tr></thead><tbody id="daily-tbody"></tbody></table>
+          </div>
+        </div>
+
+        <!-- HISTORY TAB -->
+        <div class="report-section" id="rpt-history">
+          <div class="date-filter">
+            <label style="font-size:13px;color:var(--gray-600)">From:</label>
+            <input type="date" id="hist-from">
+            <label style="font-size:13px;color:var(--gray-600)">To:</label>
+            <input type="date" id="hist-to">
+            <button class="btn-primary" onclick="loadHistory()"><i class="ti ti-search"></i> Search</button>
+            <button class="btn-print no-print" onclick="printHistory()"><i class="ti ti-printer"></i> Print</button>
+          </div>
+          <div class="report-card"><h3><i class="ti ti-history" style="font-size:16px"></i> Transaction History</h3>
+            <table class="data-table"><thead><tr><th>OR #</th><th>Date & Time</th><th>Items</th><th>Cashier</th><th>Discount</th><th>Total</th><th>Action</th></tr></thead><tbody id="hist-tbody"></tbody></table>
+          </div>
+        </div>
+      </div>
+
+      <!-- BRANCHES -->
+      <div class="screen" id="screen-branches">
+        <div class="page-header" style="display:flex;align-items:center;justify-content:space-between">
+          <div><h2>Branch Management</h2><p>Manage AJIVA Pharmacy branches</p></div>
+          <button class="btn-primary" onclick="openBranchModal()"><i class="ti ti-plus"></i> Add Branch</button>
+        </div>
+        <div id="branches-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px"></div>
+      </div>
+
+      <!-- SHIFT / EOD SCREEN -->
+      <div class="screen" id="screen-shift">
+        <div class="page-header" style="display:flex;align-items:flex-start;justify-content:space-between">
+          <div><h2>Shift & End of Day</h2><p>Manage cashier shifts and daily cash readings</p></div>
+          <div style="display:flex;gap:8px">
+            <button class="btn-primary" onclick="openShiftModal('open')" id="btn-open-shift"><i class="ti ti-clock-play"></i> Open Shift</button>
+            <button class="btn-print no-print" onclick="printEOD()" id="btn-print-eod" style="display:none"><i class="ti ti-printer"></i> Print EOD Report</button>
+            <button class="btn-secondary" onclick="openShiftModal('close')" id="btn-close-shift" style="display:none;border-color:var(--red);color:var(--red)"><i class="ti ti-clock-stop"></i> Close Shift</button>
+          </div>
+        </div>
+        <!-- Active Shift Banner -->
+        <div id="active-shift-banner" style="display:none;background:var(--green-light);border:1.5px solid var(--green);border-radius:var(--radius-lg);padding:1rem 1.25rem;margin-bottom:1.25rem;display:none">
+          <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+            <div style="display:flex;align-items:center;gap:10px">
+              <i class="ti ti-clock-play" style="font-size:24px;color:var(--green)"></i>
+              <div><div style="font-weight:700;font-size:14px;color:var(--green)">Shift Active</div><div style="font-size:12px;color:var(--gray-600)" id="shift-started-at"></div></div>
+            </div>
+            <div style="display:flex;gap:20px">
+              <div style="text-align:center"><div style="font-size:11px;color:var(--gray-600)">Opening Cash</div><div style="font-size:18px;font-weight:700;color:var(--green)" id="shift-opening-cash">₱0.00</div></div>
+              <div style="text-align:center"><div style="font-size:11px;color:var(--gray-600)">Sales So Far</div><div style="font-size:18px;font-weight:700" id="shift-sales-so-far">₱0.00</div></div>
+              <div style="text-align:center"><div style="font-size:11px;color:var(--gray-600)">Expected in Drawer</div><div style="font-size:18px;font-weight:700;color:var(--blue)" id="shift-expected">₱0.00</div></div>
+            </div>
+          </div>
+        </div>
+        <!-- EOD Summary -->
+        <div id="eod-summary" style="display:none">
+          <div class="stat-grid" style="grid-template-columns:repeat(4,1fr)">
+            <div class="stat-card stat-green"><div class="stat-label">Total Sales</div><div class="stat-value" id="eod-sales">₱0.00</div></div>
+            <div class="stat-card"><div class="stat-label">Transactions</div><div class="stat-value" id="eod-txcount">0</div></div>
+            <div class="stat-card"><div class="stat-label">Opening Cash</div><div class="stat-value" id="eod-opening">₱0.00</div></div>
+            <div class="stat-card"><div class="stat-label">Cash Over/Short</div><div class="stat-value" id="eod-variance" style="color:var(--green)">₱0.00</div></div>
+          </div>
+          <div class="report-card" style="background:white;border-radius:var(--radius-lg);padding:1.25rem;border:1px solid var(--gray-200);margin-top:12px">
+            <h3 style="font-size:14px;font-weight:600;margin-bottom:1rem;display:flex;align-items:center;gap:6px"><i class="ti ti-list" style="font-size:16px"></i> Shift Transactions</h3>
+            <table class="data-table"><thead><tr><th>OR #</th><th>Time</th><th>Items</th><th>Cashier</th><th>Total</th></tr></thead><tbody id="eod-tx-tbody"></tbody></table>
+          </div>
+        </div>
+        <!-- Past Shifts -->
+        <div class="report-card" style="background:white;border-radius:var(--radius-lg);padding:1.25rem;border:1px solid var(--gray-200);margin-top:12px">
+          <h3 style="font-size:14px;font-weight:600;margin-bottom:1rem;display:flex;align-items:center;gap:6px"><i class="ti ti-history" style="font-size:16px"></i> Shift History</h3>
+          <table class="data-table"><thead><tr><th>Date</th><th>Cashier</th><th>Branch</th><th>Opening</th><th>Closing Cash</th><th>Sales</th><th>Variance</th><th>Status</th></tr></thead><tbody id="shift-history-tbody"></tbody></table>
+        </div>
+      </div>
+
+      <!-- INCOMING STOCK SCREEN -->
+      <div class="screen" id="screen-incoming">
+        <div class="page-header" style="display:flex;align-items:flex-start;justify-content:space-between">
+          <div><h2>Incoming Stock</h2><p>Record stock deliveries and purchase orders</p></div>
+          <button class="btn-primary" onclick="openIncomingModal()"><i class="ti ti-plus"></i> Add Delivery</button>
+        </div>
+        <div class="stat-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:1.25rem">
+          <div class="stat-card"><div class="stat-label"><i class="ti ti-truck-delivery" style="font-size:14px"></i> Total Deliveries</div><div class="stat-value" id="inc-total">0</div></div>
+          <div class="stat-card stat-green"><div class="stat-label"><i class="ti ti-package" style="font-size:14px"></i> Items Restocked</div><div class="stat-value" id="inc-items">0</div></div>
+          <div class="stat-card stat-amber"><div class="stat-label"><i class="ti ti-clock" style="font-size:14px"></i> Pending Deliveries</div><div class="stat-value" id="inc-pending">0</div></div>
+        </div>
+        <table class="data-table" id="incoming-table">
+          <thead><tr><th>#</th><th>Product</th><th>Supplier</th><th>Qty Received</th><th>Cost/Unit</th><th>Total Cost</th><th>Date</th><th>Status</th><th>Action</th></tr></thead>
+          <tbody id="incoming-tbody"></tbody>
+        </table>
+      </div>
+
+      <!-- ALERTS SCREEN -->
+      <div class="screen" id="screen-alerts">
+        <div class="page-header"><h2>Alerts & Notifications</h2><p>Expiry alerts and low stock warnings</p></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="report-card" style="background:white;border-radius:var(--radius-lg);padding:1.25rem;border:1px solid var(--gray-200)">
+            <h3 style="font-size:14px;font-weight:600;margin-bottom:1rem;display:flex;align-items:center;gap:6px;color:var(--red)"><i class="ti ti-calendar-x" style="font-size:16px"></i> Expiry Alerts</h3>
+            <div id="expiry-alerts-list"></div>
+          </div>
+          <div class="report-card" style="background:white;border-radius:var(--radius-lg);padding:1.25rem;border:1px solid var(--gray-200)">
+            <h3 style="font-size:14px;font-weight:600;margin-bottom:1rem;display:flex;align-items:center;gap:6px;color:var(--amber)"><i class="ti ti-alert-triangle" style="font-size:16px"></i> Low Stock Alerts</h3>
+            <div id="lowstock-alerts-list"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- USER MANAGEMENT SCREEN -->
+      <div class="screen" id="screen-users">
+        <div class="page-header" style="display:flex;align-items:flex-start;justify-content:space-between">
+          <div><h2>User Management</h2><p>Manage cashier and staff accounts</p></div>
+          <button class="btn-primary" onclick="openUserModal()"><i class="ti ti-user-plus"></i> Add User</button>
+        </div>
+        <div class="stat-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:1.25rem">
+          <div class="stat-card stat-green"><div class="stat-label"><i class="ti ti-users" style="font-size:14px"></i> Total Users</div><div class="stat-value" id="usr-total">0</div></div>
+          <div class="stat-card"><div class="stat-label"><i class="ti ti-user-check" style="font-size:14px"></i> Active</div><div class="stat-value" id="usr-active">0</div></div>
+          <div class="stat-card stat-amber"><div class="stat-label"><i class="ti ti-user-off" style="font-size:14px"></i> Inactive</div><div class="stat-value" id="usr-inactive">0</div></div>
+        </div>
+        <table class="data-table">
+          <thead><tr><th>#</th><th>Name</th><th>Username</th><th>Role</th><th>Branch</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody id="users-tbody"></tbody>
+        </table>
+      </div>
+
+      <!-- REFUND ENTRY SCREEN -->
+      <div class="screen" id="screen-refund">
+        <div class="page-header"><h2>Refund Entry</h2><p>Process customer returns and refunds</p></div>
+        <div style="display:grid;grid-template-columns:1fr 380px;gap:12px;height:calc(100vh - 52px - 2.5rem - 60px)">
+          <!-- LEFT: Search Transaction -->
+          <div style="display:flex;flex-direction:column;gap:12px;overflow:hidden">
+            <div style="background:white;border-radius:var(--radius-lg);padding:1rem;border:1px solid var(--gray-200)">
+              <div style="font-size:14px;font-weight:600;margin-bottom:.75rem;display:flex;align-items:center;gap:6px"><i class="ti ti-search" style="font-size:16px"></i> Find Transaction</div>
+              <div style="display:flex;gap:8px">
+                <input type="text" id="refund-search" placeholder="Enter OR number (e.g. OR-000001)..." style="flex:1;padding:9px 12px;border:1.5px solid var(--gray-200);border-radius:var(--radius);font-size:13px;outline:none" onkeydown="if(event.key==='Enter')searchRefundTx()">
+                <button class="btn-primary" onclick="searchRefundTx()"><i class="ti ti-search"></i> Search</button>
+              </div>
+              <div id="refund-tx-result" style="margin-top:12px"></div>
+            </div>
+            <!-- Items to refund -->
+            <div style="background:white;border-radius:var(--radius-lg);padding:1rem;border:1px solid var(--gray-200);flex:1;overflow:auto">
+              <div style="font-size:14px;font-weight:600;margin-bottom:.75rem;display:flex;align-items:center;gap:6px"><i class="ti ti-package-import" style="font-size:16px"></i> Items to Refund</div>
+              <div id="refund-items-list"><div style="font-size:13px;color:var(--gray-400);text-align:center;padding:2rem">Search for a transaction to start a refund</div></div>
+            </div>
+          </div>
+          <!-- RIGHT: Refund Summary -->
+          <div style="background:white;border-radius:var(--radius-lg);border:1px solid var(--gray-200);display:flex;flex-direction:column;overflow:hidden">
+            <div style="padding:1rem;border-bottom:1px solid var(--gray-200)">
+              <h3 style="font-size:14px;font-weight:600;display:flex;align-items:center;gap:6px"><i class="ti ti-receipt-refund" style="font-size:16px"></i> Refund Summary</h3>
+            </div>
+            <div style="flex:1;padding:1rem;overflow:auto">
+              <div id="refund-summary-items"><div style="font-size:13px;color:var(--gray-400);text-align:center;padding:2rem">No items selected for refund</div></div>
+            </div>
+            <div style="padding:1rem;border-top:1px solid var(--gray-200)">
+              <div style="display:flex;justify-content:space-between;font-size:13px;color:var(--gray-600);margin-bottom:6px"><span>Items to Refund</span><span id="refund-item-count">0 items</span></div>
+              <div style="display:flex;justify-content:space-between;font-size:16px;font-weight:700;border-top:1px solid var(--gray-200);padding-top:8px;margin-top:4px"><span>REFUND AMOUNT</span><span id="refund-total" style="color:var(--red)">₱0.00</span></div>
+              <div class="form-field" style="margin-top:10px;margin-bottom:10px">
+                <label style="font-size:12px;font-weight:600;color:var(--gray-600)">Reason for Refund *</label>
+                <select id="refund-reason" style="width:100%;padding:8px 10px;border:1.5px solid var(--gray-200);border-radius:var(--radius);font-size:13px;outline:none;margin-top:4px">
+                  <option value="">-- Select Reason --</option>
+                  <option>Wrong item dispensed</option>
+                  <option>Customer changed mind</option>
+                  <option>Defective / Damaged product</option>
+                  <option>Expired product</option>
+                  <option>Duplicate purchase</option>
+                  <option>Other</option>
+                </select>
+              </div>
+              <div class="form-field" style="margin-bottom:10px">
+                <label style="font-size:12px;font-weight:600;color:var(--gray-600)">Notes (optional)</label>
+                <input type="text" id="refund-notes" placeholder="Additional notes..." style="width:100%;padding:8px 10px;border:1.5px solid var(--gray-200);border-radius:var(--radius);font-size:13px;outline:none;margin-top:4px">
+              </div>
+              <button class="checkout-btn" id="process-refund-btn" onclick="processRefund()" disabled style="background:var(--red)">
+                <i class="ti ti-receipt-refund"></i> Process Refund
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- PRICE INQUIRY / PLU SCREEN -->
+      <div class="screen" id="screen-plu">
+        <div class="page-header"><h2>Price Inquiry (PLU)</h2><p>Quick product price and stock lookup</p></div>
+        <div style="background:white;border-radius:var(--radius-lg);padding:1.25rem;border:1px solid var(--gray-200);margin-bottom:12px">
+          <div style="display:flex;gap:8px;align-items:center">
+            <div class="search-input-wrap" style="flex:1;max-width:500px">
+              <i class="ti ti-search"></i>
+              <input type="text" id="plu-search" placeholder="Search product name or generic name..." oninput="renderPLU()" style="width:100%">
+            </div>
+            <select id="plu-cat" onchange="renderPLU()" style="padding:8px 10px;border:1.5px solid var(--gray-200);border-radius:var(--radius);font-size:13px;outline:none">
+              <option value="">All Categories</option>
+            </select>
+            <div style="font-size:13px;color:var(--gray-600)" id="plu-count"></div>
+          </div>
+        </div>
+        <!-- PLU Big Display -->
+        <div id="plu-selected-display" style="display:none;background:linear-gradient(135deg,#0f5132,#1a7a4a);border-radius:var(--radius-lg);padding:1.5rem;margin-bottom:12px;color:white">
+          <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+            <div>
+              <div style="font-size:11px;opacity:.7;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px" id="plu-disp-cat"></div>
+              <div style="font-size:22px;font-weight:700;margin-bottom:2px" id="plu-disp-name"></div>
+              <div style="font-size:13px;opacity:.8" id="plu-disp-generic"></div>
+            </div>
+            <div style="text-align:right">
+              <div style="font-size:11px;opacity:.7;margin-bottom:2px">PRICE</div>
+              <div style="font-size:42px;font-weight:700;line-height:1" id="plu-disp-price"></div>
+            </div>
+          </div>
+          <div style="display:flex;gap:20px;margin-top:12px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.2)">
+            <div><div style="font-size:11px;opacity:.7">Stock</div><div style="font-size:18px;font-weight:700" id="plu-disp-stock"></div></div>
+            <div><div style="font-size:11px;opacity:.7">Category</div><div style="font-size:18px;font-weight:700" id="plu-disp-cat2"></div></div>
+            <div><div style="font-size:11px;opacity:.7">Expiry</div><div style="font-size:18px;font-weight:700" id="plu-disp-expiry"></div></div>
+            <div><div style="font-size:11px;opacity:.7">Status</div><div style="font-size:18px;font-weight:700" id="plu-disp-status"></div></div>
+          </div>
+        </div>
+        <!-- PLU Grid -->
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px" id="plu-grid"></div>
+      </div>
+
+      </div>
+
+    </main>
+
+  <!-- MOBILE BOTTOM NAV -->
+  <div class="mobile-bottom-nav" id="mobile-bottom-nav" style="display:none">
+    <button onclick="showScreen('dashboard');closeSidebar()" id="mbn-dashboard">
+      <i class="ti ti-layout-dashboard"></i>
+      <span>Dashboard</span>
+    </button>
+    <button onclick="showScreen('pos');closeSidebar()" id="mbn-pos">
+      <i class="ti ti-shopping-cart"></i>
+      <span>Cashier</span>
+    </button>
+    <button onclick="showScreen('inventory');closeSidebar()" id="mbn-inventory" style="display:none">
+      <i class="ti ti-package"></i>
+      <span>Inventory</span>
+    </button>
+    <button onclick="showScreen('reports');closeSidebar()" id="mbn-reports" style="display:none">
+      <i class="ti ti-chart-bar"></i>
+      <span>Reports</span>
+    </button>
+    <button onclick="toggleSidebar()" id="mbn-menu">
+      <i class="ti ti-menu-2"></i>
+      <span>Menu</span>
+    </button>
+  </div>
+  </div>
+</div>
+
+<!-- ADD/EDIT PRODUCT MODAL -->
+<div class="modal-overlay" id="product-modal">
+  <div class="modal">
+    <button class="modal-close" onclick="closeModal('product-modal')"><i class="ti ti-x"></i></button>
+    <h3 id="pm-title"><i class="ti ti-package" style="font-size:18px"></i> Add Product</h3>
+    <div class="form-row">
+      <div class="form-field"><label>Product Name *</label><input type="text" id="pm-name" placeholder="e.g. Biogesic 500mg"></div>
+      <div class="form-field"><label>Category *</label>
+        <select id="pm-cat"><option>Analgesics</option><option>Antibiotics</option><option>Vitamins</option><option>Antacids</option><option>Antihistamines</option><option>Cough &amp; Cold</option><option>Wound Care</option><option>Personal Care</option><option>Others</option></select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-field"><label>Price (₱) *</label><input type="number" id="pm-price" placeholder="0.00" step="0.01" min="0"></div>
+      <div class="form-field"><label>Stock Qty *</label><input type="number" id="pm-stock" placeholder="0" min="0"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-field"><label>Low Stock Alert</label><input type="number" id="pm-lowstock" value="10" min="0"></div>
+      <div class="form-field"><label>Expiry Date</label><input type="date" id="pm-expiry"></div>
+    </div>
+    <div class="form-field"><label>Generic Name</label><input type="text" id="pm-generic" placeholder="e.g. Paracetamol"></div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="closeModal('product-modal')">Cancel</button>
+      <button class="btn-primary" onclick="saveProduct()"><i class="ti ti-check"></i> Save</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- ADD/EDIT USER MODAL -->
+<div class="modal-overlay" id="user-modal">
+  <div class="modal" style="width:440px">
+    <button class="modal-close" onclick="closeModal('user-modal')"><i class="ti ti-x"></i></button>
+    <h3 id="um-title"><i class="ti ti-user-plus" style="font-size:18px"></i> Add User</h3>
+    <div class="form-row">
+      <div class="form-field"><label>Full Name *</label><input type="text" id="um-name" placeholder="e.g. Juan dela Cruz"></div>
+      <div class="form-field"><label>Role *</label>
+        <select id="um-role">
+          <option value="cashier">Cashier</option>
+          <option value="admin">Admin</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-field"><label>Username *</label><input type="text" id="um-username" placeholder="e.g. cashier1" autocomplete="off"></div>
+      <div class="form-field"><label>Branch</label>
+        <select id="um-branch"><option value="">-- Select Branch --</option></select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-field"><label id="um-pass-label">Password *</label>
+        <div style="position:relative">
+          <input type="password" id="um-password" placeholder="Enter password" autocomplete="new-password" style="width:100%;padding:8px 36px 8px 10px;border:1.5px solid var(--gray-200);border-radius:var(--radius);font-size:13px;outline:none">
+          <button onclick="togglePassVis('um-password','um-pass-eye')" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--gray-400)" id="um-pass-eye"><i class="ti ti-eye"></i></button>
+        </div>
+      </div>
+      <div class="form-field"><label>Confirm Password *</label>
+        <div style="position:relative">
+          <input type="password" id="um-confirm" placeholder="Confirm password" autocomplete="new-password" style="width:100%;padding:8px 36px 8px 10px;border:1.5px solid var(--gray-200);border-radius:var(--radius);font-size:13px;outline:none">
+          <button onclick="togglePassVis('um-confirm','um-conf-eye')" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--gray-400)" id="um-conf-eye"><i class="ti ti-eye"></i></button>
+        </div>
+      </div>
+    </div>
+    <div class="form-field">
+      <label>Status</label>
+      <select id="um-status">
+        <option value="true">Active</option>
+        <option value="false">Inactive</option>
+      </select>
+    </div>
+    <div id="um-error" style="color:var(--red);font-size:12px;margin-bottom:8px;display:none"></div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="closeModal('user-modal')">Cancel</button>
+      <button class="btn-primary" onclick="saveUser()"><i class="ti ti-check"></i> Save User</button>
+    </div>
+  </div>
+</div>
+
+<!-- CHANGE PASSWORD MODAL -->
+<div class="modal-overlay" id="change-pass-modal">
+  <div class="modal" style="width:380px">
+    <button class="modal-close" onclick="closeModal('change-pass-modal')"><i class="ti ti-x"></i></button>
+    <h3><i class="ti ti-key" style="font-size:18px"></i> Change Password</h3>
+    <div style="background:var(--green-light);border-radius:var(--radius);padding:10px 14px;margin-bottom:1rem;font-size:13px;color:#155e3a">
+      Changing password for: <strong id="cp-username-label"></strong>
+    </div>
+    <div class="form-field">
+      <label>New Password *</label>
+      <div style="position:relative">
+        <input type="password" id="cp-new" placeholder="Enter new password" style="width:100%;padding:8px 36px 8px 10px;border:1.5px solid var(--gray-200);border-radius:var(--radius);font-size:13px;outline:none">
+        <button onclick="togglePassVis('cp-new','cp-eye')" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--gray-400)" id="cp-eye"><i class="ti ti-eye"></i></button>
+      </div>
+    </div>
+    <div class="form-field">
+      <label>Confirm New Password *</label>
+      <input type="password" id="cp-confirm" placeholder="Confirm new password" style="width:100%;padding:8px 10px;border:1.5px solid var(--gray-200);border-radius:var(--radius);font-size:13px;outline:none">
+    </div>
+    <div id="cp-error" style="color:var(--red);font-size:12px;margin-bottom:8px;display:none"></div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="closeModal('change-pass-modal')">Cancel</button>
+      <button class="btn-primary" onclick="confirmChangePass()"><i class="ti ti-check"></i> Change Password</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- REFUND RECEIPT MODAL -->
+<div class="modal-overlay" id="refund-receipt-modal">
+  <div class="modal" style="width:420px">
+    <button class="modal-close" onclick="closeModal('refund-receipt-modal')"><i class="ti ti-x"></i></button>
+    <h3 style="color:var(--red)"><i class="ti ti-receipt-refund" style="font-size:18px"></i> Refund Receipt</h3>
+    <div class="receipt" id="refund-receipt-body"></div>
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <button class="btn-print" style="flex:1;justify-content:center" onclick="printRefundReceipt()"><i class="ti ti-printer"></i> Print Receipt</button>
+      <button class="btn-secondary" style="flex:1;justify-content:center" onclick="closeModal('refund-receipt-modal')"><i class="ti ti-check"></i> Done</button>
+    </div>
+  </div>
+</div>
+
+<!-- ADD/EDIT BRANCH MODAL -->
+<div class="modal-overlay" id="branch-modal">
+  <div class="modal" style="width:400px">
+    <button class="modal-close" onclick="closeModal('branch-modal')"><i class="ti ti-x"></i></button>
+    <h3 id="bm-title"><i class="ti ti-building-store" style="font-size:18px"></i> Add Branch</h3>
+    <div style="background:var(--green-light);border-radius:var(--radius);padding:10px 14px;margin-bottom:1rem;font-size:13px;color:#155e3a;display:flex;align-items:center;gap:8px">
+      <i class="ti ti-info-circle" style="font-size:16px"></i>
+      Branch name will be: <strong id="branch-preview">AJIVA </strong>
+    </div>
+    <div class="form-field">
+      <label>Branch Suffix (e.g. Main, BGC, Makati) *</label>
+      <input type="text" id="bm-suffix" placeholder="e.g. Main Branch" oninput="updateBranchPreview(this.value)" style="font-size:15px;font-weight:600">
+    </div>
+    <div class="form-field">
+      <label>Branch Code (short, unique) *</label>
+      <input type="text" id="bm-code" placeholder="e.g. BGC, MKT, MAIN" style="text-transform:uppercase">
+    </div>
+    <div class="form-field">
+      <label>Address (optional)</label>
+      <input type="text" id="bm-address" placeholder="e.g. 123 Main St, Taguig City">
+    </div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="closeModal('branch-modal')">Cancel</button>
+      <button class="btn-primary" onclick="saveBranch()"><i class="ti ti-check"></i> Save Branch</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- SHIFT OPEN/CLOSE MODAL -->
+<div class="modal-overlay" id="shift-modal">
+  <div class="modal" style="width:400px">
+    <button class="modal-close" onclick="closeModal('shift-modal')"><i class="ti ti-x"></i></button>
+    <h3 id="shift-modal-title"><i class="ti ti-clock-play" style="font-size:18px"></i> Open Shift</h3>
+    <div id="shift-modal-body">
+      <div class="form-field">
+        <label>Cashier Name</label>
+        <input type="text" id="shift-cashier" placeholder="Enter cashier name" readonly>
+      </div>
+      <div class="form-field">
+        <label id="shift-cash-label">Opening Cash in Drawer (₱)</label>
+        <input type="number" id="shift-opening" placeholder="Enter amount" min="0" step="0.01" style="font-size:18px;font-weight:700;text-align:center;width:100%;padding:10px;border:1.5px solid var(--gray-200);border-radius:var(--radius);outline:none" oninput="calcVariance()">
+      </div>
+      <div class="numpad" style="margin-bottom:10px">
+        <button class="numpad-btn" onclick="shiftNumpad(100)">₱100</button>
+        <button class="numpad-btn" onclick="shiftNumpad(200)">₱200</button>
+        <button class="numpad-btn" onclick="shiftNumpad(500)">₱500</button>
+        <button class="numpad-btn" onclick="shiftNumpad(1000)">₱1,000</button>
+        <button class="numpad-btn" onclick="shiftNumpadExact()">Exact</button>
+        <button class="numpad-btn" onclick="shiftNumpadClear()" style="color:var(--red)">Clear</button>
+      </div>
+      <div class="form-field" id="closing-cash-field" style="display:none">
+        <label>Actual Cash in Drawer (₱) — Count your cash</label>
+        <input type="number" id="shift-closing" placeholder="Enter amount" min="0" step="0.01" style="font-size:18px;font-weight:700;text-align:center;width:100%;padding:10px;border:1.5px solid var(--gray-200);border-radius:var(--radius);outline:none" oninput="calcVariance()">
+      </div>
+      <div id="variance-display" style="display:none;background:var(--gray-50);border-radius:var(--radius);padding:12px;margin-bottom:1rem">
+        <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:6px"><span>Expected in Drawer:</span><span id="variance-expected" style="font-weight:600">₱0.00</span></div>
+        <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:6px"><span>Actual Cash Counted:</span><span id="variance-actual" style="font-weight:600">₱0.00</span></div>
+        <div style="display:flex;justify-content:space-between;font-size:14px;font-weight:700;border-top:1px solid var(--gray-200);padding-top:6px;margin-top:4px"><span>Over / Short:</span><span id="variance-diff">₱0.00</span></div>
+      </div>
+      <div class="form-field">
+        <label>Notes (optional)</label>
+        <input type="text" id="shift-notes" placeholder="Any notes...">
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="closeModal('shift-modal')">Cancel</button>
+      <button class="btn-primary" id="shift-confirm-btn" onclick="confirmShift()"><i class="ti ti-check"></i> Open Shift</button>
+    </div>
+  </div>
+</div>
+
+<!-- INCOMING STOCK MODAL -->
+<div class="modal-overlay" id="incoming-modal">
+  <div class="modal" style="width:460px">
+    <button class="modal-close" onclick="closeModal('incoming-modal')"><i class="ti ti-x"></i></button>
+    <h3><i class="ti ti-truck-delivery" style="font-size:18px"></i> Add Incoming Stock</h3>
+    <div class="form-field">
+      <label>Product *</label>
+      <select id="inc-product" onchange="fillIncProduct()">
+        <option value="">-- Select Product --</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <div class="form-field"><label>Quantity Received *</label><input type="number" id="inc-qty" placeholder="0" min="1"></div>
+      <div class="form-field"><label>Cost per Unit (₱)</label><input type="number" id="inc-cost" placeholder="0.00" step="0.01" min="0"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-field"><label>Supplier Name</label><input type="text" id="inc-supplier" placeholder="e.g. Mercury Drug Supplier"></div>
+      <div class="form-field"><label>Delivery Date</label><input type="date" id="inc-date"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-field"><label>New Expiry Date (optional)</label><input type="date" id="inc-expiry"></div>
+      <div class="form-field"><label>Status</label>
+        <select id="inc-status">
+          <option value="received">Received</option>
+          <option value="pending">Pending</option>
+          <option value="partial">Partial</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-field"><label>Notes</label><input type="text" id="inc-notes" placeholder="Any delivery notes..."></div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="closeModal('incoming-modal')">Cancel</button>
+      <button class="btn-primary" onclick="saveIncoming()"><i class="ti ti-check"></i> Save Delivery</button>
+    </div>
+  </div>
+</div>
+
+<!-- VOID TRANSACTION MODAL -->
+<div class="modal-overlay" id="void-modal">
+  <div class="modal" style="width:400px">
+    <button class="modal-close" onclick="closeModal('void-modal')"><i class="ti ti-x"></i></button>
+    <h3 style="color:var(--red)"><i class="ti ti-ban" style="font-size:18px"></i> Void Transaction</h3>
+    <div style="background:#fee2e2;border-radius:var(--radius);padding:10px 14px;margin-bottom:1rem;font-size:13px;color:#991b1b">
+      ⚠️ Voiding will reverse stock quantities. This cannot be undone.
+    </div>
+    <div id="void-tx-details" style="background:var(--gray-50);border-radius:var(--radius);padding:12px;margin-bottom:1rem;font-size:13px"></div>
+    <div class="form-field"><label>Reason for Void *</label><input type="text" id="void-reason" placeholder="e.g. Wrong item, customer returned"></div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="closeModal('void-modal')">Cancel</button>
+      <button style="padding:8px 14px;background:var(--red);color:white;border:none;border-radius:var(--radius);font-size:13px;font-weight:600;cursor:pointer" onclick="confirmVoid()"><i class="ti ti-ban"></i> Confirm Void</button>
+    </div>
+  </div>
+</div>
+
+<!-- CASH PAYMENT MODAL -->
+<div class="modal-overlay" id="cash-modal">
+  <div class="modal" style="width:360px">
+    <button class="modal-close" onclick="closeModal('cash-modal')"><i class="ti ti-x"></i></button>
+    <h3><i class="ti ti-cash" style="font-size:18px"></i> Cash Payment</h3>
+    <div class="cash-display"><div class="label">Amount Due</div><div class="amount" id="cash-due">₱0.00</div></div>
+    <div class="form-field"><label>Cash Tendered</label><input type="number" id="cash-tendered" placeholder="Enter amount" min="0" step="0.01" oninput="calcChange()" style="font-size:18px;font-weight:700;text-align:center"></div>
+    <div class="numpad">
+      <button class="numpad-btn" onclick="numpadTap(100)">₱100</button>
+      <button class="numpad-btn" onclick="numpadTap(200)">₱200</button>
+      <button class="numpad-btn" onclick="numpadTap(500)">₱500</button>
+      <button class="numpad-btn" onclick="numpadTap(1000)">₱1,000</button>
+      <button class="numpad-btn" onclick="numpadExact()">Exact</button>
+      <button class="numpad-btn" onclick="document.getElementById('cash-tendered').value='';calcChange()" style="color:var(--red)">Clear</button>
+    </div>
+    <div class="change-display"><span>Change</span><span class="change-val" id="cash-change">₱0.00</span></div>
+    <button class="checkout-btn" id="confirm-btn" onclick="confirmPayment()" disabled><i class="ti ti-check"></i> Confirm Payment</button>
+  </div>
+</div>
+
+<!-- RECEIPT MODAL -->
+<div class="modal-overlay" id="receipt-modal">
+  <div class="modal" style="width:420px">
+    <button class="modal-close" onclick="closeModal('receipt-modal');resetPOS()"><i class="ti ti-x"></i></button>
+    <h3><i class="ti ti-receipt" style="font-size:18px"></i> Official Receipt</h3>
+    <div class="receipt" id="receipt-body"></div>
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <button class="btn-print" style="flex:1;justify-content:center" onclick="printReceipt()"><i class="ti ti-printer"></i> Print Receipt</button>
+      <button class="btn-secondary" style="flex:1;justify-content:center" onclick="closeModal('receipt-modal');resetPOS()"><i class="ti ti-plus"></i> New Transaction</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ===== STATE =====
+let sbClient = null;
+let dbMode = 'local'; // 'supabase' or 'local'
+let currentUser = null;
+let products = [];
+let transactions = [];
+let txItems = [];
+let cart = [];
+let discountAmt = 0;
+let selectedCat = 'All';
+let editingProdId = null;
+let currentTx = null;
+let activeReportTab = 'summary';
+let nextLocalId = 100;
+let branches = [];
+let currentBranch = null;
+let editingBranchId = null;
+
+// Built-in admin only — all other users must be created by admin in User Management
+const BUILTIN_ADMIN = { username:'admin', pass:'admin123', role:'admin', name:'Admin' };
+
+const SAMPLE_PRODUCTS = [
+  {id:1,name:'Biogesic 500mg',generic:'Paracetamol',category:'Analgesics',price:8.50,stock:120,low_stock_alert:20,expiry_date:'2026-06-30'},
+  {id:2,name:'Medicol Advance',generic:'Ibuprofen',category:'Analgesics',price:12.00,stock:85,low_stock_alert:20,expiry_date:'2026-09-15'},
+  {id:3,name:'Mefenamic Acid 500mg',generic:'Mefenamic Acid',category:'Analgesics',price:9.75,stock:60,low_stock_alert:15,expiry_date:'2027-01-20'},
+  {id:4,name:'Amoxicillin 500mg',generic:'Amoxicillin',category:'Antibiotics',price:15.00,stock:8,low_stock_alert:15,expiry_date:'2026-08-10'},
+  {id:5,name:'Azithromycin 500mg',generic:'Azithromycin',category:'Antibiotics',price:45.00,stock:30,low_stock_alert:10,expiry_date:'2026-12-01'},
+  {id:6,name:'Cetirizine 10mg',generic:'Cetirizine',category:'Antihistamines',price:7.50,stock:95,low_stock_alert:20,expiry_date:'2027-03-15'},
+  {id:7,name:'Vitamin C 500mg',generic:'Ascorbic Acid',category:'Vitamins',price:6.00,stock:200,low_stock_alert:30,expiry_date:'2027-06-30'},
+  {id:8,name:'Vitamin B Complex',generic:'B-Complex',category:'Vitamins',price:8.00,stock:5,low_stock_alert:20,expiry_date:'2026-11-15'},
+  {id:9,name:'Kremil-S Tablet',generic:'Simethicone',category:'Antacids',price:10.50,stock:110,low_stock_alert:20,expiry_date:'2027-01-01'},
+  {id:10,name:'Solmux 500mg',generic:'Carbocisteine',category:'Cough & Cold',price:14.00,stock:55,low_stock_alert:15,expiry_date:'2026-07-20'},
+  {id:11,name:'Decolgen Forte',generic:'Phenylpropanolamine',category:'Cough & Cold',price:9.00,stock:4,low_stock_alert:20,expiry_date:'2026-09-01'},
+  {id:12,name:'Betadine 10ml',generic:'Povidone-Iodine',category:'Wound Care',price:35.00,stock:25,low_stock_alert:10,expiry_date:'2027-05-10'},
+  {id:13,name:'Cotton Balls (50s)',generic:'',category:'Personal Care',price:28.00,stock:40,low_stock_alert:10,expiry_date:''},
+  {id:14,name:'Loratadine 10mg',generic:'Loratadine',category:'Antihistamines',price:11.00,stock:70,low_stock_alert:15,expiry_date:'2027-02-28'},
+  {id:15,name:'Omeprazole 20mg',generic:'Omeprazole',category:'Antacids',price:18.00,stock:40,low_stock_alert:10,expiry_date:'2026-10-30'},
+];
+
+// ===== SUPABASE SETUP =====
+function copySQL() {
+  const sql = document.getElementById('setup-sql-box').textContent;
+  navigator.clipboard.writeText(sql).then(() => showToast('SQL copied!', 'success'));
+}
+
+async function connectSupabase() {
+  const url = document.getElementById('sb-url').value.trim();
+  const key = document.getElementById('sb-key').value.trim();
+  const errEl = document.getElementById('setup-error');
+  if (!url || !key) { errEl.textContent = 'Please enter both URL and anon key.'; errEl.style.display = 'block'; return; }
+  try {
+    sbClient = supabase.createClient(url, key);
+    const { error } = await sbClient.from('products').select('id').limit(1);
+    if (error) throw error;
+    dbMode = 'supabase';
+    localStorage.setItem('ajiva_sb_url', url);
+    localStorage.setItem('ajiva_sb_key', key);
+    await showLoginScreen();
+  } catch(e) {
+    errEl.textContent = 'Connection failed: ' + (e.message || 'Check your URL and key, and make sure you ran the SQL.');
+    errEl.style.display = 'block';
+  }
+}
+
+async function skipToLocal() {
+  dbMode = 'local';
+  products = JSON.parse(JSON.stringify(SAMPLE_PRODUCTS));
+  await showLoginScreen();
+}
+
+async function showLoginScreen() {
+  document.getElementById('setup-screen').style.display = 'none';
+  document.getElementById('login-screen').style.display = 'flex';
+  const badge = document.getElementById('db-badge');
+  if (dbMode === 'supabase') {
+    badge.innerHTML = '<span class="db-status online"><i class="ti ti-database" style="font-size:13px"></i> Connected to Supabase</span>';
+    await loadBranchesFromDB();
+    await loadUsersFromDB();
+  } else {
+    badge.innerHTML = '<span class="db-status local"><i class="ti ti-wifi-off" style="font-size:13px"></i> Offline / Local Mode</span>';
+    branches = JSON.parse(localStorage.getItem('ajiva_branches') || '[{"id":"1","name":"AJIVA Main Branch","code":"MAIN","address":"","is_active":true}]');
+    populateBranchDropdown();
+    await loadUsersFromDB();
+  }
+}
+
+// ===== LOGIN =====
+async function doLogin() {
+  const uname = document.getElementById('login-user').value.trim();
+  const pass = document.getElementById('login-pass').value;
+  const branchEl = document.getElementById('login-branch');
+  const branchId = branchEl.value;
+  const branchName = branchEl.options[branchEl.selectedIndex]?.text || '';
+  const errEl = document.getElementById('login-error');
+
+  if (!uname || !pass) { errEl.textContent = 'Please enter username and password.'; errEl.style.display='block'; return; }
+  if (!branchId) { errEl.textContent = 'Please select a branch.'; errEl.style.display='block'; return; }
+
+  // Check built-in admin
+  let matchedUser = null;
+  if (uname === BUILTIN_ADMIN.username && pass === BUILTIN_ADMIN.pass) {
+    matchedUser = { username: BUILTIN_ADMIN.username, name: BUILTIN_ADMIN.name, role: BUILTIN_ADMIN.role };
+  }
+
+  // Check DB/local created users
+  if (!matchedUser) {
+    const dbUser = posUsers.find(u => u.username === uname && u.password === pass && u.is_active !== false);
+    if (dbUser) {
+      // Check branch restriction — if user has assigned branch, they can only log in to that branch
+      if (dbUser.branch_id && String(dbUser.branch_id) !== String(branchId)) {
+        errEl.textContent = 'You are not assigned to this branch. Please select your assigned branch.';
+        errEl.style.display = 'block';
+        return;
+      }
+      matchedUser = { username: dbUser.username, name: dbUser.name, role: dbUser.role, id: dbUser.id };
+    }
+  }
+
+  if (matchedUser) {
+    currentUser = matchedUser;
+    currentBranch = { id: branchId, name: branchName };
+    document.getElementById('login-screen').style.display = 'none';
+    document.getElementById('app').style.display = 'flex';
+    document.getElementById('nav-user-label').textContent = currentUser.name + ' — ' + branchName;
+
+    // Reset all nav items first
+    ['nav-admin-section','nav-inventory','nav-reports','nav-branches',
+     'nav-ops-label','nav-shift','nav-incoming','nav-alerts','nav-users','nav-refund','nav-plu'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.style.display = '';
+    });
+
+    // Hide admin-only items for cashier
+    if (currentUser.role === 'cashier') {
+      ['nav-admin-section','nav-inventory','nav-reports','nav-branches',
+       'nav-ops-label','nav-incoming','nav-alerts','nav-users','nav-refund'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = 'none';
+      });
+    }
+    errEl.style.display = 'none';
+    initApp();
+    initMobileNav();
+  } else {
+    errEl.textContent = 'Invalid username or password, or account is inactive.';
+    errEl.style.display = 'block';
+  }
+}
+
+function doLogout() {
+  currentUser = null; cart = []; discountAmt = 0; currentShift = null; products = []; transactions = []; txItems = [];
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('login-screen').style.display = 'flex';
+  document.getElementById('login-user').value = '';
+  document.getElementById('login-pass').value = '';
+}
+
+// ===== INIT =====
+async function initApp() {
+  const d = new Date();
+  document.getElementById('dash-date').textContent = d.toLocaleDateString('en-PH', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
+  const branchBadge = document.getElementById('dash-branch-badge');
+  if (branchBadge && currentBranch) branchBadge.textContent = '📍 ' + currentBranch.name;
+  const today = d.toISOString().split('T')[0];
+  document.getElementById('daily-date').value = today;
+  document.getElementById('hist-to').value = today;
+  const w = new Date(d); w.setDate(w.getDate()-7);
+  document.getElementById('hist-from').value = w.toISOString().split('T')[0];
+  if (dbMode === 'supabase') {
+    await loadBranchesFromDB();
+    await loadProductsFromDB();
+    await loadTransactionsFromDB();
+    await loadUsersFromDB();
+  } else {
+    branches = JSON.parse(localStorage.getItem('ajiva_branches') || '[{"id":"1","name":"AJIVA Main Branch","code":"MAIN","address":"","is_active":true}]');
+    populateBranchDropdown();
+    await loadUsersFromDB();
+  }
+  // Filter local products by branch
+  if (dbMode !== 'supabase' && currentBranch?.id) {
+    products = products.filter(p => !p.branch_id || String(p.branch_id) === String(currentBranch.id));
+  }
+  initCatTabs();
+  renderProducts();
+  renderInventory();
+  populateCatFilter();
+  const invLabel = document.getElementById('inv-branch-label');
+  if (invLabel && currentBranch) invLabel.textContent = 'Branch: ' + currentBranch.name;
+  // Filter local transactions by branch
+  if (dbMode !== 'supabase' && currentBranch?.id) {
+    transactions = transactions.filter(t => !t.branch_id || String(t.branch_id) === String(currentBranch.id));
+  }
+  renderDashboard();
+  renderReports();
+  renderAlerts();
+}
+
+// ===== DB OPERATIONS =====
+async function loadBranchesFromDB() {
+  const { data, error } = await sbClient.from('branches').select('*').order('created_at');
+  if (!error && data) {
+    if (data.length === 0) {
+      await sbClient.from('branches').insert([{ name:'AJIVA Main Branch', code:'MAIN', address:'', is_active:true }]);
+      await loadBranchesFromDB();
+      return;
+    }
+    branches = data;
+    populateBranchDropdown();
+    renderBranches();
+  }
+}
+
+function populateBranchDropdown() {
+  const sel = document.getElementById('login-branch');
+  const active = branches.filter(b => b.is_active !== false);
+  sel.innerHTML = '<option value="">-- Select Branch --</option>' + active.map(b => `<option value="${b.id}">${b.name}</option>`).join('');
+}
+
+function renderBranches() {
+  const grid = document.getElementById('branches-grid');
+  if (!grid) return;
+  if (branches.length === 0) { grid.innerHTML = '<div style="font-size:13px;color:var(--gray-400)">No branches yet.</div>'; return; }
+  grid.innerHTML = branches.map(b => {
+    const txCount = transactions.filter(t => String(t.branch_id) === String(b.id) || t.branch_name === b.name).length;
+    const revenue = transactions.filter(t => String(t.branch_id) === String(b.id) || t.branch_name === b.name).reduce((a,t)=>a+parseFloat(t.total||0),0);
+    return `<div style="background:white;border-radius:var(--radius-lg);padding:1.25rem;border:1px solid var(--gray-200);position:relative">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:.75rem">
+        <div style="width:42px;height:42px;background:var(--green-light);border-radius:var(--radius);display:flex;align-items:center;justify-content:center;border:1.5px solid var(--green)">
+          <i class="ti ti-building-store" style="font-size:20px;color:var(--green)"></i>
+        </div>
+        <div style="display:flex;gap:6px">
+          <button class="action-btn edit-btn" onclick="openBranchModal(${b.id})"><i class="ti ti-edit" style="font-size:12px"></i></button>
+          <button class="action-btn del-btn" onclick="deleteBranch(${b.id})"><i class="ti ti-trash" style="font-size:12px"></i></button>
+        </div>
+      </div>
+      <div style="font-size:15px;font-weight:700;color:var(--gray-800);margin-bottom:2px">${b.name}</div>
+      <div style="font-size:12px;color:var(--gray-400);margin-bottom:8px">${b.address||'No address set'}</div>
+      <div style="display:flex;gap:8px">
+        <span class="badge badge-green">${b.code}</span>
+        <span class="badge ${b.is_active!==false?'badge-green':'badge-red'}">${b.is_active!==false?'Active':'Inactive'}</span>
+      </div>
+      <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--gray-100);display:flex;justify-content:space-between;font-size:12px;color:var(--gray-600)">
+        <span><i class="ti ti-receipt" style="font-size:13px"></i> ${txCount} transactions</span>
+        <span style="font-weight:700;color:var(--green)">${fmt(revenue)}</span>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function updateBranchPreview(val) {
+  document.getElementById('branch-preview').textContent = 'AJIVA ' + (val||'');
+  document.getElementById('bm-code').value = val.toUpperCase().replace(/\s+/g,'').substring(0,6);
+}
+
+function openBranchModal(id=null) {
+  editingBranchId = id;
+  document.getElementById('bm-title').innerHTML = id ? '<i class="ti ti-edit" style="font-size:18px"></i> Edit Branch' : '<i class="ti ti-building-store" style="font-size:18px"></i> Add Branch';
+  if (id) {
+    const b = branches.find(x => x.id == id);
+    const suffix = b.name.replace('AJIVA ','');
+    document.getElementById('bm-suffix').value = suffix;
+    document.getElementById('bm-code').value = b.code;
+    document.getElementById('bm-address').value = b.address||'';
+    document.getElementById('branch-preview').textContent = b.name;
+  } else {
+    document.getElementById('bm-suffix').value = '';
+    document.getElementById('bm-code').value = '';
+    document.getElementById('bm-address').value = '';
+    document.getElementById('branch-preview').textContent = 'AJIVA ';
+  }
+  openModal('branch-modal');
+}
+
+async function saveBranch() {
+  const suffix = document.getElementById('bm-suffix').value.trim();
+  const code = document.getElementById('bm-code').value.trim().toUpperCase();
+  const address = document.getElementById('bm-address').value.trim();
+  if (!suffix || !code) { showToast('Branch name and code are required','error'); return; }
+  const fullName = 'AJIVA ' + suffix;
+  const branchData = { name: fullName, code, address, is_active: true };
+  if (dbMode === 'supabase') {
+    if (editingBranchId) {
+      await sbClient.from('branches').update(branchData).eq('id', editingBranchId);
+    } else {
+      await sbClient.from('branches').insert([branchData]);
+    }
+    await loadBranchesFromDB();
+  } else {
+    if (editingBranchId) {
+      const b = branches.find(x => x.id == editingBranchId);
+      Object.assign(b, branchData);
+    } else {
+      branches.push({ id: String(nextLocalId++), ...branchData });
+    }
+    localStorage.setItem('ajiva_branches', JSON.stringify(branches));
+    populateBranchDropdown();
+    renderBranches();
+  }
+  closeModal('branch-modal');
+  showToast(editingBranchId ? 'Branch updated!' : 'Branch added!', 'success');
+}
+
+async function deleteBranch(id) {
+  if (!confirm('Delete this branch?')) return;
+  if (dbMode === 'supabase') {
+    await sbClient.from('branches').delete().eq('id', id);
+    await loadBranchesFromDB();
+  } else {
+    branches = branches.filter(x => x.id != id);
+    localStorage.setItem('ajiva_branches', JSON.stringify(branches));
+    populateBranchDropdown();
+    renderBranches();
+  }
+  showToast('Branch deleted','success');
+}
+
+async function loadProductsFromDB() {
+  // Always clear products first — each branch is independent
+  products = [];
+  const { data, error } = await sbClient
+    .from('products')
+    .select('*')
+    .eq('branch_id', currentBranch.id)
+    .order('name');
+  if (!error && data) {
+    products = data;
+  }
+  // If this is a brand new branch with no products yet, stay empty — 
+  // admin will add products manually for this branch
+}
+
+async function seedSampleData() {
+  const clean = SAMPLE_PRODUCTS.map(p => ({ name:p.name, generic:p.generic, category:p.category, price:p.price, stock:p.stock, low_stock_alert:p.low_stock_alert, expiry_date:p.expiry_date||null, branch_id: currentBranch?.id||null, branch_name: currentBranch?.name||null }));
+  const { data } = await sbClient.from('products').insert(clean).select();
+  if (data) products = data;
+}
+
+async function loadTransactionsFromDB() {
+  // Load only transactions for current branch
+  let txQuery = sbClient.from('transactions').select('*').order('created_at', { ascending:false }).limit(500);
+  if (currentBranch?.id) {
+    txQuery = txQuery.eq('branch_id', currentBranch.id);
+  }
+  const { data: txData } = await txQuery;
+  if (txData) transactions = txData;
+
+  // Load transaction items only for these transactions
+  if (txData && txData.length > 0) {
+    const txIds = txData.map(t => t.id);
+    const { data: itemData } = await sbClient.from('transaction_items').select('*').in('transaction_id', txIds);
+    if (itemData) txItems = itemData;
+  } else {
+    txItems = [];
+  }
+}
+
+async function saveProductToDB(prod) {
+  if (editingProdId) {
+    const { error } = await sbClient.from('products').update(prod).eq('id', editingProdId);
+    return !error;
+  } else {
+    const { error } = await sbClient.from('products').insert([prod]);
+    return !error;
+  }
+}
+
+async function deleteProductFromDB(id) {
+  const { error } = await sbClient.from('products').delete().eq('id', id);
+  return !error;
+}
+
+async function saveTxToDB(tx, items) {
+  const orNum = 'OR-' + String(Date.now()).slice(-6).padStart(6, '0');
+  const txRow = { 
+    or_number: orNum, 
+    cashier: tx.cashier, 
+    subtotal: parseFloat(tx.subtotal.toFixed(2)), 
+    discount: parseFloat(tx.discount.toFixed(2)), 
+    total: parseFloat(tx.total.toFixed(2)), 
+    tendered: parseFloat(tx.tendered.toFixed(2)), 
+    change_amount: parseFloat(tx.change.toFixed(2)), 
+    branch_id: currentBranch?.id ? parseInt(currentBranch.id) : null, 
+    branch_name: currentBranch?.name||''
+  };
+  const { data: txResult, error } = await sbClient.from('transactions').insert([txRow]).select().single();
+  if (error) { 
+    console.error('TX Save Error:', error); 
+    showToast('DB Error: ' + (error.message||error.code||'Unknown'), 'error'); 
+    return null; 
+  }
+  if (!txResult) return null;
+  const itemRows = items.map(i => ({ transaction_id: txResult.id, product_id: i.id, product_name: i.name, price: i.price, quantity: i.qty, subtotal: i.price * i.qty }));
+  await sbClient.from('transaction_items').insert(itemRows);
+  for (const i of items) {
+    const p = products.find(x => x.id === i.id);
+    if (p) await sbClient.from('products').update({ stock: p.stock - i.qty }).eq('id', p.id);
+  }
+  return { ...txResult, items: itemRows };
+}
+
+// ===== DASHBOARD =====
+function renderDashboard() {
+  const today = new Date().toDateString();
+  let todayTx, todaySales;
+  if (dbMode === 'supabase') {
+    todayTx = transactions.filter(t => new Date(t.created_at).toDateString() === today);
+    todaySales = todayTx.reduce((a, t) => a + parseFloat(t.total), 0);
+  } else {
+    todayTx = transactions.filter(t => new Date(t.date).toDateString() === today);
+    todaySales = todayTx.reduce((a, t) => a + t.total, 0);
+  }
+  const low = products.filter(p => p.stock <= p.low_stock_alert && p.stock > 0);
+  const out = products.filter(p => p.stock === 0);
+  document.getElementById('s-sales').textContent = fmt(todaySales);
+  document.getElementById('s-txcount').textContent = todayTx.length + ' transactions';
+  document.getElementById('s-tx').textContent = todayTx.length;
+  document.getElementById('s-low').textContent = low.length + out.length;
+  document.getElementById('s-items').textContent = products.length;
+  const recentEl = document.getElementById('dash-recent');
+  if (transactions.length === 0) {
+    recentEl.innerHTML = '<div style="font-size:13px;color:var(--gray-400);text-align:center;padding:1rem">No transactions yet</div>';
+  } else {
+    recentEl.innerHTML = [...transactions].slice(0, 6).map(t => {
+      const orNum = t.or_number || ('OR-' + String(t.id).padStart(4,'0'));
+      const dt = new Date(t.created_at || t.date);
+      const timeStr = dt.toLocaleTimeString('en-PH', {hour:'2-digit', minute:'2-digit'});
+      return `<div class="transaction-row"><div><div style="font-weight:500">${orNum}</div><div style="font-size:12px;color:var(--gray-400)">${timeStr}</div></div><div class="tx-amount">${fmt(parseFloat(t.total))}</div></div>`;
+    }).join('');
+  }
+  const lsEl = document.getElementById('dash-lowstock');
+  const alerts = [...out, ...low].slice(0, 6);
+  if (alerts.length === 0) {
+    lsEl.innerHTML = '<div style="font-size:13px;color:#166534;text-align:center;padding:1rem">✓ All stocks are sufficient</div>';
+  } else {
+    lsEl.innerHTML = alerts.map(p => `<div class="low-stock-row"><div style="font-size:13px;font-weight:500">${p.name}</div><span class="badge ${p.stock === 0 ? 'badge-red' : 'badge-amber'}">${p.stock === 0 ? 'Out of Stock' : 'Low: ' + p.stock}</span></div>`).join('');
+  }
+}
+
+// ===== CATEGORY TABS =====
+function initCatTabs() {
+  const cats = ['All', ...new Set(products.map(p => p.category || p.cat))];
+  document.getElementById('cat-tabs').innerHTML = cats.map(c => `<button class="cat-tab ${c===selectedCat?'active':''}" onclick="selectCat('${c}',this)">${c}</button>`).join('');
+}
+function selectCat(c, el) {
+  selectedCat = c;
+  document.querySelectorAll('.cat-tab').forEach(t => t.classList.remove('active'));
+  if (el) el.classList.add('active');
+  renderProducts();
+}
+
+// ===== PRODUCTS =====
+function renderProducts() {
+  const q = (document.getElementById('pos-search').value || '').toLowerCase();
+  let f = products;
+  if (selectedCat !== 'All') f = f.filter(p => (p.category||p.cat) === selectedCat);
+  if (q) f = f.filter(p => p.name.toLowerCase().includes(q) || (p.generic||'').toLowerCase().includes(q));
+  const grid = document.getElementById('products-grid');
+  if (f.length === 0) { grid.innerHTML = '<div style="font-size:13px;color:var(--gray-400);padding:1rem">No products found.</div>'; return; }
+  grid.innerHTML = f.map(p => {
+    const oos = p.stock === 0;
+    const low = p.stock > 0 && p.stock <= (p.low_stock_alert||10);
+    return `<div class="product-card ${oos?'out-of-stock':''}" onclick="${oos?'':'addToCart('+p.id+')'}">
+      <div class="product-cat">${p.category||p.cat}</div>
+      <div class="product-name">${p.name}</div>
+      ${p.generic?`<div style="font-size:11px;color:var(--gray-400);margin-bottom:3px">${p.generic}</div>`:''}
+      <div class="product-price">${fmt(p.price)}</div>
+      <div class="product-stock-label ${low?'low':''}">${oos?'Out of stock':low?'⚠ Low: '+p.stock:p.stock+' in stock'}</div>
+    </div>`;
+  }).join('');
+}
+
+// ===== CART =====
+function addToCart(id) {
+  const p = products.find(x => x.id == id);
+  if (!p || p.stock === 0) return;
+  const ex = cart.find(x => x.id == id);
+  if (ex) {
+    if (ex.qty >= p.stock) { showToast('Not enough stock!', 'error'); return; }
+    ex.qty++;
+  } else { cart.push({ id: p.id, name: p.name, price: p.price, qty: 1 }); }
+  renderCart();
+}
+function changeQty(id, delta) {
+  const idx = cart.findIndex(x => x.id == id);
+  if (idx < 0) return;
+  const p = products.find(x => x.id == id);
+  cart[idx].qty += delta;
+  if (cart[idx].qty <= 0) cart.splice(idx, 1);
+  else if (delta > 0 && p && cart[idx].qty > p.stock) { cart[idx].qty = p.stock; showToast('Max stock reached','error'); }
+  renderCart();
+}
+function clearCart() { cart = []; discountAmt = 0; document.getElementById('discount-input').value = ''; renderCart(); }
+function removeFromCart(id) { cart = cart.filter(x => x.id != id); renderCart(); }
+function applyDiscount() { discountAmt = parseFloat(document.getElementById('discount-input').value) || 0; calcTotal(); }
+function calcTotal() {
+  const sub = cart.reduce((a, i) => a + i.price * i.qty, 0);
+  const dis = Math.min(discountAmt, sub);
+  document.getElementById('cart-subtotal').textContent = fmt(sub);
+  document.getElementById('cart-disc-show').textContent = '-' + fmt(dis);
+  document.getElementById('cart-total').textContent = fmt(sub - dis);
+  document.getElementById('checkout-btn').disabled = cart.length === 0;
+}
+function renderCart() {
+  const el = document.getElementById('cart-items');
+  if (cart.length === 0) {
+    el.innerHTML = '<div class="cart-empty"><i class="ti ti-shopping-cart-off"></i><span>Cart is empty</span></div>';
+  } else {
+    el.innerHTML = cart.map(item => `
+      <div class="cart-item">
+        <div class="cart-item-info"><div class="cart-item-name">${item.name}</div><div class="cart-item-price">${fmt(item.price)} each</div></div>
+        <div class="cart-qty">
+          <button class="qty-btn" onclick="changeQty(${item.id},-1)">−</button>
+          <span class="qty-num">${item.qty}</span>
+          <button class="qty-btn" onclick="changeQty(${item.id},1)">+</button>
+        </div>
+        <div class="cart-item-total">${fmt(item.price*item.qty)}</div>
+        <button class="cart-remove" onclick="removeFromCart(${item.id})"><i class="ti ti-x"></i></button>
+      </div>`).join('');
+  }
+  const count = cart.reduce((a, i) => a + i.qty, 0);
+  document.getElementById('cart-count').textContent = count > 0 ? `(${count})` : '';
+  calcTotal();
+}
+
+// ===== CASH MODAL =====
+function openCashModal() {
+  const sub = cart.reduce((a,i) => a + i.price*i.qty, 0);
+  const total = sub - Math.min(discountAmt, sub);
+  document.getElementById('cash-due').textContent = fmt(total);
+  document.getElementById('cash-tendered').value = '';
+  document.getElementById('cash-change').textContent = '₱0.00';
+  document.getElementById('cash-change').style.color = 'var(--green)';
+  document.getElementById('confirm-btn').disabled = true;
+  openModal('cash-modal');
+}
+function numpadTap(v) {
+  const cur = parseFloat(document.getElementById('cash-tendered').value) || 0;
+  document.getElementById('cash-tendered').value = (cur + v).toFixed(2);
+  calcChange();
+}
+function numpadExact() {
+  const due = parseFloat(document.getElementById('cash-due').textContent.replace('₱','').replace(/,/g,'')) || 0;
+  document.getElementById('cash-tendered').value = due.toFixed(2);
+  calcChange();
+}
+function calcChange() {
+  const due = parseFloat(document.getElementById('cash-due').textContent.replace('₱','').replace(/,/g,'')) || 0;
+  const ten = parseFloat(document.getElementById('cash-tendered').value) || 0;
+  const ch = ten - due;
+  document.getElementById('cash-change').textContent = ch >= 0 ? fmt(ch) : '₱0.00';
+  document.getElementById('cash-change').style.color = ch >= 0 ? 'var(--green)' : 'var(--red)';
+  document.getElementById('confirm-btn').disabled = ten < due;
+}
+
+async function confirmPayment() {
+  const sub = cart.reduce((a, i) => a + i.price*i.qty, 0);
+  const dis = Math.min(discountAmt, sub);
+  const total = sub - dis;
+  const tendered = parseFloat(document.getElementById('cash-tendered').value) || 0;
+  const change = tendered - total;
+  document.getElementById('confirm-btn').disabled = true;
+  document.getElementById('confirm-btn').innerHTML = '<div class="spinner" style="width:18px;height:18px;border-width:2px"></div>';
+
+  if (dbMode === 'supabase') {
+    const result = await saveTxToDB({ cashier: currentUser.name, subtotal: sub, discount: dis, total, tendered, change }, cart);
+    if (result) {
+      cart.forEach(item => { const p = products.find(x => x.id == item.id); if (p) p.stock -= item.qty; });
+      transactions.unshift(result);
+      currentTx = result;
+      closeModal('cash-modal');
+      showReceiptModal(result, cart.map(i=>({...i})));
+      cart = []; discountAmt = 0;
+      await loadProductsFromDB();
+    } else {
+      showToast('Error saving transaction', 'error');
+    }
+  } else {
+    const orNum = 'OR-' + String(nextLocalId++).padStart(6,'0');
+    const tx = { id: nextLocalId, or_number: orNum, cashier: currentUser.name, subtotal: sub, discount: dis, total, tendered, change_amount: change, branch_id: currentBranch?.id||null, branch_name: currentBranch?.name||'', date: new Date().toISOString(), created_at: new Date().toISOString(), items: cart.map(i=>({...i})) };
+    cart.forEach(item => { const p = products.find(x => x.id == item.id); if (p) p.stock -= item.qty; });
+    transactions.unshift(tx);
+    closeModal('cash-modal');
+    showReceiptModal(tx, tx.items);
+    cart = []; discountAmt = 0;
+  }
+  document.getElementById('confirm-btn').disabled = false;
+  document.getElementById('confirm-btn').innerHTML = '<i class="ti ti-check"></i> Confirm Payment';
+  renderDashboard();
+  renderProducts();
+}
+
+// ===== RECEIPT =====
+function showReceiptModal(tx, items) {
+  const dt = new Date(tx.created_at || tx.date);
+  const orNum = tx.or_number || ('OR-' + String(tx.id).padStart(6,'0'));
+  const dateStr = dt.toLocaleDateString('en-PH', {year:'numeric',month:'short',day:'numeric'});
+  const timeStr = dt.toLocaleTimeString('en-PH', {hour:'2-digit',minute:'2-digit'});
+  const itemLines = items.map(i => {
+    const nm = i.name.length > 20 ? i.name.slice(0,20)+'…' : i.name;
+    return `<div class="receipt-row"><span>${nm} x${i.qty}</span><span>${fmt(i.price*i.qty)}</span></div>`;
+  }).join('');
+  document.getElementById('receipt-body').innerHTML = `
+    <div class="receipt-header"><div style="font-size:16px;font-weight:700;letter-spacing:.5px">AJIVA PHARMACY</div><div style="font-size:10.5px;margin-top:1px">Official Receipt</div></div>
+    <div class="receipt-divider"></div>
+    <div class="receipt-row"><span>OR #:</span><span>${orNum}</span></div>
+    <div class="receipt-row"><span>Date:</span><span>${dateStr}</span></div>
+    <div class="receipt-row"><span>Time:</span><span>${timeStr}</span></div>
+    <div class="receipt-row"><span>Cashier:</span><span>${tx.cashier}</span></div>
+    <div class="receipt-divider"></div>
+    ${itemLines}
+    <div class="receipt-divider"></div>
+    <div class="receipt-row"><span>Subtotal:</span><span>${fmt(parseFloat(tx.subtotal))}</span></div>
+    ${parseFloat(tx.discount)>0?`<div class="receipt-row"><span>Discount:</span><span>-${fmt(parseFloat(tx.discount))}</span></div>`:''}
+    <div class="receipt-total-row"><span>TOTAL:</span><span>${fmt(parseFloat(tx.total))}</span></div>
+    <div class="receipt-divider"></div>
+    <div class="receipt-row"><span>Cash:</span><span>${fmt(parseFloat(tx.tendered||tx.tendered))}</span></div>
+    <div class="receipt-row"><span>Change:</span><span>${fmt(parseFloat(tx.change_amount||tx.change||0))}</span></div>
+    <div class="receipt-divider"></div>
+    <div style="text-align:center;font-size:11px;margin-top:6px">Thank you for your purchase!<br>Get well soon! 💊<br><br>VAT Reg TIN: 000-000-000-000</div>`;
+  openModal('receipt-modal');
+  showToast('Payment successful! ' + fmt(parseFloat(tx.total)), 'success');
+  currentTx = { tx, items };
+}
+
+function printReceipt() {
+  const content = document.getElementById('receipt-body').innerHTML;
+  const printWindow = window.open('', '_blank', 'width=400,height=600');
+  if (!printWindow) { showToast('Allow popups to print receipt', 'error'); return; }
+  printWindow.document.write(`<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>Receipt</title>
+<style>
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { font-family:'Courier New',monospace; font-size:12px; padding:12px; width:80mm; margin:0 auto; line-height:1.6; }
+  .receipt-header { text-align:center; margin-bottom:8px; }
+  .receipt-divider { border-bottom:1px dashed #999; margin:5px 0; }
+  .receipt-row { display:flex; justify-content:space-between; }
+  .receipt-total-row { display:flex; justify-content:space-between; font-weight:700; font-size:13px; }
+  @media print { body { padding:0; } }
+</style></head>
+<body>${content}
+
+<!-- JavaScript Modules -->
+<script src="js/config.js"></script>
+<script src="js/database.js"></script>
+<script src="js/branches.js"></script>
+<script src="js/users.js"></script>
+<script src="js/auth.js"></script>
+<script src="js/init.js"></script>
+<script src="js/dashboard.js"></script>
+<script src="js/pos.js"></script>
+<script src="js/inventory.js"></script>
+<script src="js/reports.js"></script>
+<script src="js/shifts.js"></script>
+<script src="js/refund.js"></script>
+<script src="js/plu.js"></script>
+<script src="js/incoming.js"></script>
+<script src="js/alerts.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/app.js"></script>
+
+</body>
+</html>

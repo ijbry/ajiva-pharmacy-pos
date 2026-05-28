@@ -2,7 +2,6 @@
 
 A **Web-Based Point of Sale System** built for small and growing pharmacy businesses in the Philippines. Designed to work like TGP (The Generics Pharmacy) POS but for privately-owned pharmacies.
 
-> Built by **James Brian Villar** with assistance from Claude AI (Anthropic)
 
 ---
 
